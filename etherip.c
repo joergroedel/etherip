@@ -400,7 +400,6 @@ out:
  * the tunnel to be added to a bridge */
 static void etherip_tunnel_setup(struct net_device *dev)
 {
-	SET_MODULE_OWNER(dev);
 	ether_setup(dev);
 	dev->open            = etherip_tunnel_open;
 	dev->hard_start_xmit = etherip_tunnel_xmit;
