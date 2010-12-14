@@ -189,8 +189,9 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb = skn;
 	}
 
-	skb->h.raw = skb->nh.raw;
-	skb->nh.raw = skb_push(skb, sizeof(struct iphdr)+ETHERIP_HLEN);
+	skb->transport_header = skb->mac_header;
+	skb_push(skb, sizeof(struct iphdr)+ETHERIP_HLEN);
+	skb_reset_network_header(skb);
 	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED |
 			IPSKB_REROUTED);
@@ -206,7 +207,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	 *       encapsulated within the Ethernet packet which do not
 	 *       know the concept of a path MTU
 	 */
-	iph = skb->nh.iph;
+	iph = ip_hdr(skb);
 	iph->version = 4;
 	iph->ihl = sizeof(struct iphdr)>>2;
 	iph->frag_off = 0;
@@ -219,7 +220,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		iph->ttl = dst_metric(&rt->u.dst, RTAX_HOPLIMIT);
 
 	/* add the 16bit etherip header after the ip header */
-	*((u16*)(skb->nh.raw + sizeof(struct iphdr))) = ntohs(ETHERIP_HEADER);
+	((u16*)(iph+1))[0]=htons(ETHERIP_HEADER);
 	nf_reset(skb);
 	IPTUNNEL_XMIT();
 	tunnel->dev->trans_start = jiffies;
@@ -418,11 +419,10 @@ static void etherip_tunnel_setup(struct net_device *dev)
 static int etherip_rcv(struct sk_buff *skb)
 {
 	struct iphdr *iph;
-	struct ethhdr *ehdr;
 	struct etherip_tunnel *tunnel;
 	struct net_device *dev;
 
-	iph = skb->nh.iph;
+	iph = ip_hdr(skb);
 
 	read_lock_bh(&etherip_lock);
 	tunnel = etherip_tunnel_locate(iph->saddr);
@@ -431,10 +431,8 @@ static int etherip_rcv(struct sk_buff *skb)
 
 	dev = tunnel->dev;
 	secpath_reset(skb);
-	memset(&(IPCB(skb)->opt), 0, sizeof(struct ip_options));
-	skb_pull(skb, (skb->nh.raw - skb->data)
-			+ sizeof(struct iphdr) + ETHERIP_HLEN);
-	ehdr = (struct ethhdr*)skb->data;
+	skb_pull(skb, (skb_network_header(skb)-skb->data) +
+			sizeof(struct iphdr)+ETHERIP_HLEN);
 
 	skb->dev = dev;
 	skb->pkt_type = PACKET_HOST;
