@@ -121,20 +121,6 @@ static int etherip_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
-/* netdevice start function */
-static int etherip_tunnel_open(struct net_device *dev)
-{
-	netif_start_queue(dev);
-	return 0;
-}
-
-/* netdevice stop function */
-static int etherip_tunnel_stop(struct net_device *dev)
-{
-	netif_stop_queue(dev);
-	return 0;
-}
-
 /* netdevice hard_start_xmit function
  * it gets an Ethernet packet in skb and encapsulates it in another IP
  * packet */
@@ -196,8 +182,8 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED |
 			IPSKB_REROUTED);
 
-	dst_release(skb->dst);
-	skb->dst = &rt->u.dst;
+	skb_dst_drop(skb);
+	skb_dst_set(skb, &rt->u.dst);
 
 	/* Build the IP header for the outgoing packet
 	 *
@@ -236,13 +222,6 @@ tx_error:
 	dev_kfree_skb(skb);
 	tunnel->recursion--;
 	return 0;
-}
-
-/* get statistics callback */
-static struct net_device_stats *etherip_tunnel_stats(struct net_device *dev)
-{
-	struct etherip_tunnel *ethip = netdev_priv(dev);
-	return &ethip->stats;
 }
 
 /* checks parameters the driver gets from userspace */
@@ -395,20 +374,22 @@ out:
 	return err;
 }
 
+static const struct net_device_ops etherip_netdev_ops = {
+	.ndo_start_xmit = etherip_tunnel_xmit,
+	.ndo_do_ioctl   = etherip_tunnel_ioctl,
+	.ndo_change_mtu = etherip_change_mtu,
+};
+
 /* device init function - called via register_netdevice
  * The tunnel is registered as an Ethernet device. This allows
  * the tunnel to be added to a bridge */
 static void etherip_tunnel_setup(struct net_device *dev)
 {
 	ether_setup(dev);
-	dev->open            = etherip_tunnel_open;
-	dev->hard_start_xmit = etherip_tunnel_xmit;
-	dev->stop            = etherip_tunnel_stop;
-	dev->get_stats       = etherip_tunnel_stats;
-	dev->do_ioctl        = etherip_tunnel_ioctl;
+	dev->netdev_ops      = &etherip_netdev_ops;
 	dev->destructor      = free_netdev;
-	dev->change_mtu      = etherip_change_mtu;
-	dev->tx_queue_len    = 0;
+	dev->mtu             = ETH_DATA_LEN;
+	dev->hard_header_len = LL_MAX_HEADER + sizeof(struct iphdr) + ETHERIP_HLEN;
 	random_ether_addr(dev->dev_addr);
 }
 
@@ -437,8 +418,7 @@ static int etherip_rcv(struct sk_buff *skb)
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, tunnel->dev);
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
-	dst_release(skb->dst);
-	skb->dst = NULL;
+	skb_dst_drop(skb);
 
 	/* do some checks */
 	if (skb->pkt_type == PACKET_HOST || skb->pkt_type == PACKET_BROADCAST)
@@ -530,6 +510,7 @@ static void __exit etherip_destroy_tunnels(void)
 			tun = list_entry(ptr, struct etherip_tunnel, list);
 			ptr = ptr->prev;
 			etherip_tunnel_del(tun);
+			dev_put(tun->dev);
 			unregister_netdevice(tun->dev);
 		}
 	}
