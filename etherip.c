@@ -159,7 +159,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	fl.nl_u.ip4_u.daddr  = tunnel->parms.iph.daddr;
 	fl.nl_u.ip4_u.saddr  = tunnel->parms.iph.saddr;
 
-	if (ip_route_output_key(&init_net, &rt, &fl)) {
+	if (ip_route_output_key(dev_net(dev), &rt, &fl)) {
 		tunnel->stats.tx_carrier_errors++;
 		goto tx_error_icmp;
 	}
@@ -174,8 +174,8 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	max_headroom = (LL_RESERVED_SPACE(tdev)+sizeof(struct iphdr)
 			+ ETHERIP_HLEN);
 
-	if (skb_headroom(skb) < max_headroom || skb_cloned(skb)
-			|| skb_shared(skb)) {
+	if (skb_headroom(skb) < max_headroom || skb_shared(skb) ||
+	    (skb_cloned(skb) && !skb_clone_writable(skb, 0))) {
 		struct sk_buff *skn = skb_realloc_headroom(skb, max_headroom);
 		if (!skn) {
 			ip_rt_put(rt);
