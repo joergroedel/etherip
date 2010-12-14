@@ -151,7 +151,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto tx_error_icmp;
 	}
 
-	tdev = rt->u.dst.dev;
+	tdev = rt->dst.dev;
 	if (tdev == dev) {
 		ip_rt_put(rt);
 		tunnel->stats.collisions++;
@@ -185,7 +185,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 			IPSKB_REROUTED);
 
 	skb_dst_drop(skb);
-	skb_dst_set(skb, &rt->u.dst);
+	skb_dst_set(skb, &rt->dst);
 
 	/* Build the IP header for the outgoing packet
 	 *
@@ -205,7 +205,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	iph->saddr = rt->rt_src;
 	iph->ttl = tunnel->parms.iph.ttl;
 	if (iph->ttl == 0)
-		iph->ttl = dst_metric(&rt->u.dst, RTAX_HOPLIMIT);
+		iph->ttl = dst_metric(&rt->dst, RTAX_HOPLIMIT);
 
 	/* add the 16bit etherip header after the ip header */
 	((u16*)(iph+1))[0]=htons(ETHERIP_HEADER);
