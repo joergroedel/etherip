@@ -114,6 +114,7 @@ int do_tunnel_list()
 	struct ip_tunnel_parm p;
 	struct in_addr daddr_s;
 	char ttl_str[8], saddr_str[16];
+	char *junk;
 
 	sd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sd == -1) {
@@ -128,8 +129,8 @@ int do_tunnel_list()
 	}
 
 	/* skip first 2 lines */
-	fgets(line, 2048, fd);
-	fgets(line, 2048, fd);
+	junk = fgets(line, 2048, fd);
+	junk = fgets(line, 2048, fd);
 
 	while (fgets(line, 2048, fd)) {
 		for (i=0;line[i] == ' ';++i);
