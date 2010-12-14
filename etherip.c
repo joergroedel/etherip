@@ -159,7 +159,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	fl.nl_u.ip4_u.daddr  = tunnel->parms.iph.daddr;
 	fl.nl_u.ip4_u.saddr  = tunnel->parms.iph.saddr;
 
-	if (ip_route_output_key(&rt, &fl)) {
+	if (ip_route_output_key(&init_net, &rt, &fl)) {
 		tunnel->stats.tx_carrier_errors++;
 		goto tx_error_icmp;
 	}
@@ -252,7 +252,7 @@ static int etherip_param_check(struct ip_tunnel_parm *p)
 	    p->iph.protocol != IPPROTO_ETHERIP ||
 	    p->iph.ihl != 5 ||
 	    p->iph.daddr == INADDR_ANY ||
-	    MULTICAST(p->iph.daddr))
+	    IN_MULTICAST(p->iph.daddr))
 		return -EINVAL;
 
 	return 0;
