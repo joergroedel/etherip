@@ -127,6 +127,7 @@ static int etherip_change_mtu(struct net_device *dev, int new_mtu)
 static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct etherip_tunnel *tunnel = netdev_priv(dev);
+	struct netdev_queue *txq = netdev_get_tx_queue(dev, 0);
 	struct rtable *rt;
 	struct iphdr *iph;
 	struct flowi fl;
@@ -165,6 +166,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		struct sk_buff *skn = skb_realloc_headroom(skb, max_headroom);
 		if (!skn) {
 			ip_rt_put(rt);
+			txq->tx_dropped++;
 			dev_kfree_skb(skb);
 			tunnel->stats.tx_dropped++;
 			return 0;
