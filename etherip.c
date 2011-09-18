@@ -168,6 +168,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 			ip_rt_put(rt);
 			txq->tx_dropped++;
 			dev_kfree_skb(skb);
+			tunnel->recursion--;
 			tunnel->stats.tx_dropped++;
 			return 0;
 		}
