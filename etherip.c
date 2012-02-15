@@ -156,7 +156,6 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct etherip_tunnel *tunnel = netdev_priv(dev);
 	struct rtable *rt;
 	struct iphdr *iph;
-	struct flowi fl;
 	struct net_device *tdev;
 	int max_headroom;
 	struct pcpu_tstats *tstats;
@@ -166,14 +165,14 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto tx_error;
 	}
 
-	memset(&fl, 0, sizeof(fl));
-	fl.oif               = tunnel->parms.link;
-	fl.proto             = IPPROTO_ETHERIP;
-	fl.nl_u.ip4_u.daddr  = tunnel->parms.iph.daddr;
-	fl.nl_u.ip4_u.saddr  = tunnel->parms.iph.saddr;
-
-	if (ip_route_output_key(dev_net(dev), &rt, &fl)) {
-		tunnel->stats.tx_carrier_errors++;
+	rt = ip_route_output_ports(dev_net(dev), NULL,
+				   tunnel->parms.iph.daddr,
+				   tunnel->parms.iph.saddr,
+				   0, 0, IPPROTO_ETHERIP,
+				   RT_TOS(tunnel->parms.iph.tos),
+				   tunnel->parms.link);
+	if (IS_ERR(rt)) {
+		dev->stats.tx_carrier_errors++;
 		goto tx_error_icmp;
 	}
 
