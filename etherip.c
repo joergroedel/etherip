@@ -159,13 +159,14 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct net_device *tdev;
 	int max_headroom;
 	struct pcpu_tstats *tstats;
+	struct flowi4 fl4;
 
 	if (tunnel->recursion++) {
 		tunnel->stats.collisions++;
 		goto tx_error;
 	}
 
-	rt = ip_route_output_ports(dev_net(dev), NULL,
+	rt = ip_route_output_ports(dev_net(dev), &fl4, NULL,
 				   tunnel->parms.iph.daddr,
 				   tunnel->parms.iph.saddr,
 				   0, 0, IPPROTO_ETHERIP,
@@ -227,8 +228,8 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	iph->frag_off = 0;
 	iph->protocol = IPPROTO_ETHERIP;
 	iph->tos = tunnel->parms.iph.tos & INET_ECN_MASK;
-	iph->daddr = rt->rt_dst;
-	iph->saddr = rt->rt_src;
+	iph->daddr = fl4.daddr;
+	iph->saddr = fl4.saddr;
 	iph->ttl = tunnel->parms.iph.ttl;
 	if (iph->ttl == 0)
 		iph->ttl = dst_metric(&rt->dst, RTAX_HOPLIMIT);
