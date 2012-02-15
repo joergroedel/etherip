@@ -58,6 +58,13 @@ MODULE_DESCRIPTION("Ethernet over IPv4 tunnel driver");
 
 #define BANNER1 "etherip: Ethernet over IPv4 tunneling driver\n"
 
+struct pcpu_tstats {
+	unsigned long rx_packets;
+	unsigned long rx_bytes;
+	unsigned long tx_packets;
+	unsigned long tx_bytes;
+};
+
 struct etherip_tunnel {
 	struct list_head list;
 	struct net_device *dev;
@@ -72,6 +79,26 @@ static struct list_head tunnels[HASH_SIZE];
 static DEFINE_RWLOCK(etherip_lock);
 
 static void etherip_tunnel_setup(struct net_device *dev);
+
+static struct net_device_stats *etherip_get_stats(struct net_device *dev)
+{
+	struct pcpu_tstats sum = { 0 };
+	int i;
+
+	for_each_possible_cpu(i) {
+		const struct pcpu_tstats *tstats = per_cpu_ptr(dev->tstats, i);
+		
+		sum.rx_packets += tstats->rx_packets;
+		sum.rx_bytes   += tstats->rx_bytes;
+		sum.tx_packets += tstats->tx_packets;
+		sum.tx_bytes   += tstats->tx_bytes;
+	}
+	dev->stats.rx_packets = sum.rx_packets;
+	dev->stats.rx_bytes   = sum.rx_bytes;
+	dev->stats.tx_packets = sum.tx_packets;
+	dev->stats.tx_bytes   = sum.tx_bytes;
+	return &dev->stats;
+}
 
 /* add a tunnel to the hash */
 static void etherip_tunnel_add(struct etherip_tunnel *tun)
@@ -127,13 +154,12 @@ static int etherip_change_mtu(struct net_device *dev, int new_mtu)
 static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct etherip_tunnel *tunnel = netdev_priv(dev);
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, 0);
 	struct rtable *rt;
 	struct iphdr *iph;
 	struct flowi fl;
 	struct net_device *tdev;
 	int max_headroom;
-	struct net_device_stats *stats = &tunnel->stats;
+	struct pcpu_tstats *tstats;
 
 	if (tunnel->recursion++) {
 		tunnel->stats.collisions++;
@@ -166,7 +192,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 		struct sk_buff *skn = skb_realloc_headroom(skb, max_headroom);
 		if (!skn) {
 			ip_rt_put(rt);
-			txq->tx_dropped++;
+			dev->stats.tx_dropped++;
 			dev_kfree_skb(skb);
 			tunnel->recursion--;
 			tunnel->stats.tx_dropped++;
@@ -211,11 +237,12 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* add the 16bit etherip header after the ip header */
 	((u16*)(iph+1))[0]=htons(ETHERIP_HEADER);
 	nf_reset(skb);
-	IPTUNNEL_XMIT();
+	tstats = this_cpu_ptr(dev->tstats);
+	__IPTUNNEL_XMIT(tstats, &dev->stats);
 	tunnel->dev->trans_start = jiffies;
 	tunnel->recursion--;
 
-	return 0;
+	return NETDEV_TX_OK;
 
 tx_error_icmp:
 	dst_link_failure(skb);
@@ -224,7 +251,7 @@ tx_error:
 	tunnel->stats.tx_errors++;
 	dev_kfree_skb(skb);
 	tunnel->recursion--;
-	return 0;
+	return NETDEV_TX_OK;
 }
 
 /* checks parameters the driver gets from userspace */
@@ -381,6 +408,7 @@ static const struct net_device_ops etherip_netdev_ops = {
 	.ndo_start_xmit = etherip_tunnel_xmit,
 	.ndo_do_ioctl   = etherip_tunnel_ioctl,
 	.ndo_change_mtu = etherip_change_mtu,
+	.ndo_get_stats  = etherip_get_stats,
 };
 
 /* device init function - called via register_netdevice
