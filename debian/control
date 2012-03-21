@@ -1,0 +1,25 @@
+Source: etherip
+Section: unknown
+Priority: extra
+Maintainer: Joerg Roedel <joro@8bytes.org>
+Build-Depends: debhelper (>= 8.0.0), bzip2
+Standards-Version: 3.9.2
+Homepage: http://www.8bytes.org/wiki/EtherIP_for_Linux
+Vcs-Git: git://git.8bytes.org/scm/etherip.git
+Vcs-Browser: http://git.8bytes.org/?p=scm/etherip.git;a=summary
+
+Package: etherip-utils
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: EtherIP tool package
+ This package contains the ethiptunnel utility which can be used to
+ setup and manage etherip based tunnels with Linux
+
+Package: etherip-source
+Architecture: all
+Depends: module-assistant, debhelper (>= 7), make, bzip2
+Description: Source for the etherip driver.
+ This package provides the source code for the etherip kernel modules.
+ The etherip-utils package is also required in order to make use of
+ these modules. Kernel source or headers are required to compile these
+ modules.

@@ -1,0 +1,20 @@
+Source: etherip
+Section: unknown
+Priority: optional
+Maintainer: Joerg Roedel <joro@8bytes.org>
+Build-Depends: debhelper (>= 7)
+Standards-Version: 3.9.2
+
+Package: etherip-modules-_KVERS_
+Architecture: any
+Provides: etherip-modules
+Description: etherip modules for Linux (kernel _KVERS_).
+ This package contains the set of loadable kernel modules for the
+ <description>.
+ .
+ This package contains the compiled kernel modules for _KVERS_
+ .
+ If you have compiled your own kernel, you will most likely need to build
+ your own etherip-modules. The etherip-source package has been
+ provided for use with the Debian's module-assistant or kernel-package
+ utilities to produce a version of etherip-modules for your kernel.
