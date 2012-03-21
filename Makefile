@@ -1,30 +1,18 @@
-ifneq ($(KERNELRELEASE),)
-  obj-m := etherip.o
-else
-  KERNELDIR ?= /lib/modules/$(shell uname -r)/build
-  MODULEDIR ?= /lib/modules/$(shell uname -r)/
-  PWD := $(shell pwd)
-
-default:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
-	$(MAKE) ethiptunnel
-
 ethiptunnel: ethiptunnel.c
-	$(CC) -Wall -O3 -o ethiptunnel ethiptunnel.c
+	$(CC) -O3 -o ethiptunnel ethiptunnel.c
+
+driver:
+	$(MAKE) -C driver
+
+driver-install:
+	$(MAKE) -C driver install
 
 install:
-	cp etherip.ko $(MODULEDIR)/kernel/net/ipv4/
-	mkdir -p $(HOME)/bin
-	cp ethiptunnel $(HOME)/bin/
-	depmod -a
+	mkdir -p $(DESTDIR)/usr/sbin
+	cp ethiptunnel $(DESTDIR)/usr/sbin/
 
 clean:
-	@rm -f etherip.ko etherip.mod.c etherip.mod.o etherip.o
-	@rm -f ethiptunnel Module.symvers
-	@find -type f -name "\.*"|xargs rm -f
-	@rm -rf .tmp_versions
-	@rm -f modules.order
+	@rm -f ethiptunnel
+	$(MAKE) -C driver clean
 
 .PHONY: clean
-
-endif
