@@ -15,4 +15,4 @@ clean:
 	@rm -f ethiptunnel
 	$(MAKE) -C driver clean
 
-.PHONY: clean
+.PHONY: clean driver driver-install install
