@@ -344,6 +344,11 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 						sizeof(p)))
 				goto add_err;
 
+			err = -ENOMEM;
+			tmp_dev->tstats = alloc_percpu(struct pcpu_tstats);
+			if (!tmp_dev->tstats)
+				goto add_err;
+
 			err = register_netdevice(tmp_dev);
 			if (err < 0)
 				goto add_err;
@@ -366,6 +371,7 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 		err = 0;
 		break;
 add_err:
+		free_percpu(tmp_dev);
 		free_netdev(tmp_dev);
 		goto out;
 
@@ -411,6 +417,12 @@ static const struct net_device_ops etherip_netdev_ops = {
 	.ndo_get_stats  = etherip_get_stats,
 };
 
+static void free_etheripdev(struct net_device *dev)
+{
+	free_percpu(dev->tstats);
+	free_netdev(dev);
+}
+
 /* device init function - called via register_netdevice
  * The tunnel is registered as an Ethernet device. This allows
  * the tunnel to be added to a bridge */
@@ -418,7 +430,7 @@ static void etherip_tunnel_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 	dev->netdev_ops      = &etherip_netdev_ops;
-	dev->destructor      = free_netdev;
+	dev->destructor      = free_etheripdev;
 	dev->mtu             = ETH_DATA_LEN;
 	dev->hard_header_len = LL_MAX_HEADER + sizeof(struct iphdr) + ETHERIP_HLEN;
 	random_ether_addr(dev->dev_addr);
@@ -511,6 +523,11 @@ static int __init etherip_init(void)
 		goto err2;
 	}
 
+	err = -ENOMEM;
+	etherip_tunnel_dev->tstats = alloc_percpu(struct pcpu_tstats);
+	if (!etherip_tunnel_dev->tstats)
+		goto err1;
+
 	p = netdev_priv(etherip_tunnel_dev);
 	p->dev = etherip_tunnel_dev;
 	/* set some params for iproute2 */
@@ -523,6 +540,7 @@ static int __init etherip_init(void)
 out:
 	return err;
 err1:
+	free_percpu(etherip_tunnel_dev->tstats);
 	free_netdev(etherip_tunnel_dev);
 err2:
 	inet_del_protocol(&etherip_protocol, IPPROTO_ETHERIP);
