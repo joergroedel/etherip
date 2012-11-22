@@ -59,10 +59,11 @@ MODULE_DESCRIPTION("Ethernet over IPv4 tunnel driver");
 #define BANNER1 "etherip: Ethernet over IPv4 tunneling driver\n"
 
 struct pcpu_tstats {
-	unsigned long rx_packets;
-	unsigned long rx_bytes;
-	unsigned long tx_packets;
-	unsigned long tx_bytes;
+	u64                   rx_packets;
+	u64                   rx_bytes;
+	u64                   tx_packets;
+	u64                   tx_bytes;
+	struct u64_stats_sync syncp;
 };
 
 struct etherip_tunnel {
