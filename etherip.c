@@ -321,6 +321,8 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 			if (err < 0)
 				goto add_err;
 
+			dev_hold(tmp_dev);
+
 			write_lock_bh(&etherip_lock);
 			etherip_tunnel_add(t);
 			write_unlock_bh(&etherip_lock);
