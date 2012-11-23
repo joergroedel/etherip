@@ -97,9 +97,16 @@ int do_tunnel_change (char *devname, __u32 daddr, __u32 saddr, int set_saddr, in
 
 int do_tunnel_del(char *devname)
 {
+	struct ip_tunnel_parm p;
 	struct ifreq ifr;
 
+	memset(&p,   0, sizeof(p));
+	memset(&ifr, 0, sizeof(ifr));
+
 	strncpy(ifr.ifr_name, devname, IFNAMSIZ);
+	strncpy(p.name, devname, IFNAMSIZ-1);
+	ifr.ifr_ifru.ifru_data = &p;
+
 	return __do_tunnel_action(SIOCDELTUNNEL, &ifr);
 }
 
