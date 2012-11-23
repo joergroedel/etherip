@@ -156,20 +156,6 @@ static void etherip_tunnel_del(struct etherip_net *ethip_net,
 	}
 }
 
-/* find a tunnel in the hash by parameters from userspace */
-static struct etherip_tunnel* etherip_tunnel_find(struct etherip_net *ethip_net,
-						  struct ip_tunnel_parm *p)
-{
-	struct etherip_tunnel *ret;
-	unsigned h = HASH(p->iph.daddr);
-
-	for_each_ethip_tunnel_rcu(ret, ethip_net->tunnels[h])
-		if (ret->parms.iph.daddr == p->iph.daddr)
-			return ret;
-
-	return NULL;
-}
-
 /* find a tunnel by its destination address */
 static struct etherip_tunnel* etherip_tunnel_locate(struct net *net,
 						    u32 remote)
@@ -183,6 +169,13 @@ static struct etherip_tunnel* etherip_tunnel_locate(struct net *net,
 			return ret;
 
 	return NULL;
+}
+
+/* find a tunnel in the hash by parameters from userspace */
+static struct etherip_tunnel* etherip_tunnel_find(struct net *net,
+						  struct ip_tunnel_parm *p)
+{
+	return etherip_tunnel_locate(net, p->iph.daddr);
 }
 
 static int etherip_change_mtu(struct net_device *dev, int new_mtu)
@@ -347,7 +340,7 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 		if ((err = etherip_param_check(&p)) < 0)
 			goto out;
 
-		t = etherip_tunnel_find(ethip_net, &p);
+		t = etherip_tunnel_find(net, &p);
 
 		err = -EEXIST;
 		if (t != NULL && t->dev != dev)
@@ -428,7 +421,7 @@ add_err:
 
 		err = -EINVAL;
 		if (dev == ethip_net->etherip_tunnel_dev) {
-			t = etherip_tunnel_find(ethip_net, &p);
+			t = etherip_tunnel_find(net, &p);
 			if (t == NULL) {
 				goto out;
 			}
