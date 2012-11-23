@@ -1,12 +1,14 @@
 /*
  * etherip.c: Ethernet over IPv4 tunnel driver (according to RFC3378)
  *
+ * Copyright (C) 2006-2012 Joerg Roedel <joro@8bytes.org>
+ *
  * This driver could be used to tunnel Ethernet packets through IPv4
  * networks. This is especially usefull together with the bridging
  * code in Linux.
  *
  * This code was written with an eye on the IPIP driver in linux from
- * Sam Lantinga. Thanks for the great work.
+ * Sam Lantinga.
  *
  *      This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -619,9 +621,6 @@ static struct net_protocol etherip_protocol = {
 	.no_policy    = 0,
 };
 
-/* module init function
- * initializes the EtherIP protocol (97) and registers the initial
- * device */
 static int __init etherip_init(void)
 {
 	int err;
@@ -647,7 +646,6 @@ err_out:
 	return err;
 }
 
-/* module cleanup function */
 static void __exit etherip_exit(void)
 {
 	if (inet_del_protocol(&etherip_protocol, IPPROTO_ETHERIP))
