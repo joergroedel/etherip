@@ -73,6 +73,7 @@ struct etherip_tunnel {
 	struct ip_tunnel_parm parms;
 };
 
+
 static struct net_device *etherip_tunnel_dev;
 static struct etherip_tunnel __rcu *tunnels[HASH_SIZE];
 
@@ -418,8 +419,6 @@ add_err:
 		} else
 			t = netdev_priv(dev);
 
-		etherip_tunnel_del(t);
-
 		unregister_netdevice(t->dev);
 		err = 0;
 
@@ -432,7 +431,16 @@ out:
 	return err;
 }
 
+static void etherip_tunnel_uninit(struct net_device *dev)
+{
+	if (dev != etherip_tunnel_dev)
+		etherip_tunnel_del(netdev_priv(dev));
+
+	dev_put(dev);
+}
+
 static const struct net_device_ops etherip_netdev_ops = {
+	.ndo_uninit	 = etherip_tunnel_uninit,
 	.ndo_start_xmit  = etherip_tunnel_xmit,
 	.ndo_do_ioctl    = etherip_tunnel_ioctl,
 	.ndo_change_mtu  = etherip_change_mtu,
@@ -551,6 +559,7 @@ static int __init etherip_init(void)
 	strcpy(p->parms.name, "ethip0");
 	p->parms.iph.protocol = IPPROTO_ETHERIP;
 
+	dev_hold(etherip_tunnel_dev);
 	if ((err = register_netdev(etherip_tunnel_dev)))
 		goto err1;
 
@@ -574,8 +583,6 @@ static void __exit etherip_destroy_tunnels(struct list_head *list)
 
 		tunnel = rtnl_dereference(tunnels[i]);
 		while (tunnel != NULL) {
-			etherip_tunnel_del(tunnel);
-			dev_put(tunnel->dev);
 			unregister_netdevice_queue(tunnel->dev, list);
 			tunnel = rtnl_dereference(tunnel->next);
 		}
