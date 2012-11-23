@@ -71,7 +71,6 @@ struct etherip_tunnel {
 	struct net_device *dev;
 	struct net_device_stats stats;
 	struct ip_tunnel_parm parms;
-	unsigned int recursion;
 };
 
 static struct net_device *etherip_tunnel_dev;
@@ -176,11 +175,6 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct pcpu_tstats *tstats;
 	struct flowi4 fl4;
 
-	if (tunnel->recursion++) {
-		tunnel->stats.collisions++;
-		goto tx_error;
-	}
-
 	rt = ip_route_output_ports(dev_net(dev), &fl4, NULL,
 				   tunnel->parms.iph.daddr,
 				   tunnel->parms.iph.saddr,
@@ -209,7 +203,6 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 			ip_rt_put(rt);
 			dev->stats.tx_dropped++;
 			dev_kfree_skb(skb);
-			tunnel->recursion--;
 			tunnel->stats.tx_dropped++;
 			return 0;
 		}
@@ -255,7 +248,6 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	tstats = this_cpu_ptr(dev->tstats);
 	__IPTUNNEL_XMIT(tstats, &dev->stats);
 	tunnel->dev->trans_start = jiffies;
-	tunnel->recursion--;
 
 	return NETDEV_TX_OK;
 
@@ -265,7 +257,6 @@ tx_error_icmp:
 tx_error:
 	tunnel->stats.tx_errors++;
 	dev_kfree_skb(skb);
-	tunnel->recursion--;
 	return NETDEV_TX_OK;
 }
 
