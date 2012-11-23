@@ -139,9 +139,70 @@ static struct etherip_tunnel* etherip_tunnel_locate(struct net *net,
 
 /* find a tunnel in the hash by parameters from userspace */
 static struct etherip_tunnel* etherip_tunnel_find(struct net *net,
-						  struct ip_tunnel_parm *p)
+						  struct ip_tunnel_parm *p,
+						  int create)
 {
-	return etherip_tunnel_locate(net, p->iph.daddr);
+	struct etherip_net *ethip_net;
+	struct etherip_tunnel *tun;
+	char dev_name[IFNAMSIZ];
+	struct net_device *dev;
+	int err;
+
+	ethip_net = net_generic(net, etherip_net_id);
+
+	tun = etherip_tunnel_locate(net, p->iph.daddr);
+	if (tun != NULL)
+		return tun;
+
+	if (!create)
+		return NULL;
+
+	if (p->name[0])
+		strlcpy(dev_name, p->name, IFNAMSIZ);
+	else
+		strcpy(dev_name, "ethip%d");
+
+	dev = alloc_netdev(sizeof(struct etherip_tunnel), dev_name,
+			   etherip_tunnel_setup);
+
+	if (dev == NULL)
+		goto err_out;
+
+	dev->tstats = alloc_percpu(struct pcpu_tstats);
+	if (!dev->tstats)
+		goto err_free_netdev;
+
+	dev_net_set(dev, net);
+
+	if (strchr(dev->name, '%')) {
+		err = dev_alloc_name(dev, dev->name);
+		if (err < 0)
+			goto err_free_percpu;
+	}
+
+	strncpy(p->name, dev->name, IFNAMSIZ);
+	tun        = netdev_priv(dev);
+	tun->dev   = dev;
+	tun->parms = *p;
+
+	err = register_netdevice(dev);
+	if (err < 0)
+		goto err_free_percpu;
+
+	dev_hold(dev);
+
+	etherip_tunnel_add(ethip_net, tun);
+
+	return tun;
+
+err_free_percpu:
+	free_percpu(dev->tstats);
+
+err_free_netdev:
+	free_netdev(dev);
+
+err_out:
+	return NULL;
 }
 
 static void etherip_tunnel_uninit(struct net_device *dev)
@@ -257,10 +318,8 @@ static int etherip_tunnel_ioctl(struct net_device *dev,
 {
 	struct net *net = dev_net(dev);
 	struct etherip_net *ethip_net;
-	struct net_device *tmp_dev;
 	struct etherip_tunnel *t;
 	struct ip_tunnel_parm p;
-	char *dev_name;
 	int err = 0;
 
 	ethip_net = net_generic(net, etherip_net_id);
@@ -296,74 +355,25 @@ static int etherip_tunnel_ioctl(struct net_device *dev,
 		    IN_MULTICAST(p.iph.daddr))
 			goto out;
 
-		t = etherip_tunnel_find(net, &p);
+		t = etherip_tunnel_find(net, &p, cmd == SIOCADDTUNNEL);
 
-		err = -EEXIST;
-		if (t != NULL && t->dev != dev)
-			goto out;
-
-		if (cmd == SIOCADDTUNNEL) {
-
-			p.name[IFNAMSIZ-1] = 0;
-			dev_name = p.name;
-			if (dev_name[0] == 0)
-				dev_name = "ethip%d";
-
-			err = -ENOMEM;
-			tmp_dev = alloc_netdev(
-					sizeof(struct etherip_tunnel),
-					dev_name,
-					etherip_tunnel_setup);
-
-			if (tmp_dev == NULL)
+		if (cmd == SIOCCHGTUNNEL) {
+			err = -EEXIST;
+			if (t != NULL && t->dev != dev)
 				goto out;
-
-			dev_net_set(tmp_dev, net);
-
-			if (strchr(tmp_dev->name, '%')) {
-				err = dev_alloc_name(tmp_dev, tmp_dev->name);
-				if (err < 0)
-					goto add_err;
-			}
-
-			t = netdev_priv(tmp_dev);
-			t->dev = tmp_dev;
-			strncpy(p.name, tmp_dev->name, IFNAMSIZ);
+			t = netdev_priv(dev);
 			memcpy(&(t->parms), &p, sizeof(p));
+		}
 
+		if (t != NULL) {
 			err = -EFAULT;
 			if (copy_to_user(ifr->ifr_ifru.ifru_data, &p,
 						sizeof(p)))
-				goto add_err;
-
-			err = -ENOMEM;
-			tmp_dev->tstats = alloc_percpu(struct pcpu_tstats);
-			if (!tmp_dev->tstats)
-				goto add_err;
-
-			err = register_netdevice(tmp_dev);
-			if (err < 0)
-				goto add_err;
-
-			dev_hold(tmp_dev);
-
-			etherip_tunnel_add(ethip_net, t);
-
-		} else {
-			err = -EINVAL;
-			if ((t = netdev_priv(dev)) == NULL)
 				goto out;
-			if (dev == ethip_net->etherip_tunnel_dev)
-				goto out;
-			memcpy(&(t->parms), &p, sizeof(p));
 		}
 
 		err = 0;
 		break;
-add_err:
-		free_percpu(tmp_dev);
-		free_netdev(tmp_dev);
-		goto out;
 
 	case SIOCDELTUNNEL:
 		err = -EPERM;
@@ -377,7 +387,7 @@ add_err:
 
 		err = -EINVAL;
 		if (dev == ethip_net->etherip_tunnel_dev) {
-			t = etherip_tunnel_find(net, &p);
+			t = etherip_tunnel_find(net, &p, 0);
 			if (t == NULL) {
 				goto out;
 			}
