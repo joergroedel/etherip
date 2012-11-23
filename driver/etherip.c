@@ -81,24 +81,38 @@ static DEFINE_RWLOCK(etherip_lock);
 
 static void etherip_tunnel_setup(struct net_device *dev);
 
-static struct net_device_stats *etherip_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *etherip_get_stats64(struct net_device *dev,
+					struct rtnl_link_stats64 *tot)
 {
-	struct pcpu_tstats sum = { 0 };
 	int i;
 
 	for_each_possible_cpu(i) {
 		const struct pcpu_tstats *tstats = per_cpu_ptr(dev->tstats, i);
+		u64 rx_packets, rx_bytes, tx_packets, tx_bytes;
+		unsigned int start;
 
-		sum.rx_packets += tstats->rx_packets;
-		sum.rx_bytes   += tstats->rx_bytes;
-		sum.tx_packets += tstats->tx_packets;
-		sum.tx_bytes   += tstats->tx_bytes;
+		do {
+			start = u64_stats_fetch_begin_bh(&tstats->syncp);
+			rx_packets = tstats->rx_packets;
+			rx_bytes   = tstats->rx_bytes;
+			tx_packets = tstats->tx_packets;
+			tx_bytes   = tstats->tx_bytes;
+		} while (u64_stats_fetch_retry_bh(&tstats->syncp, start));
+
+		tot->rx_packets += rx_packets;
+		tot->rx_bytes   += rx_bytes;
+		tot->tx_packets += tx_packets;
+		tot->tx_bytes   += tx_bytes;
 	}
-	dev->stats.rx_packets = sum.rx_packets;
-	dev->stats.rx_bytes   = sum.rx_bytes;
-	dev->stats.tx_packets = sum.tx_packets;
-	dev->stats.tx_bytes   = sum.tx_bytes;
-	return &dev->stats;
+
+        tot->tx_fifo_errors	= dev->stats.tx_fifo_errors;
+        tot->tx_carrier_errors	= dev->stats.tx_carrier_errors;
+        tot->tx_dropped		= dev->stats.tx_dropped;
+        tot->tx_aborted_errors	= dev->stats.tx_aborted_errors;
+        tot->tx_errors		= dev->stats.tx_errors;
+        tot->collisions		= dev->stats.collisions;
+
+	return tot;
 }
 
 /* add a tunnel to the hash */
@@ -414,10 +428,10 @@ out:
 }
 
 static const struct net_device_ops etherip_netdev_ops = {
-	.ndo_start_xmit = etherip_tunnel_xmit,
-	.ndo_do_ioctl   = etherip_tunnel_ioctl,
-	.ndo_change_mtu = etherip_change_mtu,
-	.ndo_get_stats  = etherip_get_stats,
+	.ndo_start_xmit  = etherip_tunnel_xmit,
+	.ndo_do_ioctl    = etherip_tunnel_ioctl,
+	.ndo_change_mtu  = etherip_change_mtu,
+	.ndo_get_stats64 = etherip_get_stats64,
 };
 
 static void free_etheripdev(struct net_device *dev)
