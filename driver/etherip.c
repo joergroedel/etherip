@@ -88,40 +88,6 @@ struct etherip_net {
 
 static void etherip_tunnel_setup(struct net_device *dev);
 
-static struct rtnl_link_stats64 *etherip_get_stats64(struct net_device *dev,
-					struct rtnl_link_stats64 *tot)
-{
-	int i;
-
-	for_each_possible_cpu(i) {
-		const struct pcpu_tstats *tstats = per_cpu_ptr(dev->tstats, i);
-		u64 rx_packets, rx_bytes, tx_packets, tx_bytes;
-		unsigned int start;
-
-		do {
-			start = u64_stats_fetch_begin_bh(&tstats->syncp);
-			rx_packets = tstats->rx_packets;
-			rx_bytes   = tstats->rx_bytes;
-			tx_packets = tstats->tx_packets;
-			tx_bytes   = tstats->tx_bytes;
-		} while (u64_stats_fetch_retry_bh(&tstats->syncp, start));
-
-		tot->rx_packets += rx_packets;
-		tot->rx_bytes   += rx_bytes;
-		tot->tx_packets += tx_packets;
-		tot->tx_bytes   += tx_bytes;
-	}
-
-        tot->tx_fifo_errors	= dev->stats.tx_fifo_errors;
-        tot->tx_carrier_errors	= dev->stats.tx_carrier_errors;
-        tot->tx_dropped		= dev->stats.tx_dropped;
-        tot->tx_aborted_errors	= dev->stats.tx_aborted_errors;
-        tot->tx_errors		= dev->stats.tx_errors;
-        tot->collisions		= dev->stats.collisions;
-
-	return tot;
-}
-
 /* add a tunnel to the hash */
 static void etherip_tunnel_add(struct etherip_net *ethip_net,
 			       struct etherip_tunnel *tun)
@@ -178,18 +144,18 @@ static struct etherip_tunnel* etherip_tunnel_find(struct net *net,
 	return etherip_tunnel_locate(net, p->iph.daddr);
 }
 
-static int etherip_change_mtu(struct net_device *dev, int new_mtu)
+static void etherip_tunnel_uninit(struct net_device *dev)
 {
-	if (new_mtu < 68 || new_mtu > ETHERIP_MAX_MTU)
-		return -EINVAL;
-	dev->mtu = new_mtu;
+	struct etherip_net *ethip_net;
 
-	return 0;
+	ethip_net = net_generic(dev_net(dev), etherip_net_id);
+
+	if (dev != ethip_net->etherip_tunnel_dev)
+		etherip_tunnel_del(ethip_net, netdev_priv(dev));
+
+	dev_put(dev);
 }
 
-/* netdevice hard_start_xmit function
- * it gets an Ethernet packet in skb and encapsulates it in another IP
- * packet */
 static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct etherip_tunnel *tunnel = netdev_priv(dev);
@@ -285,24 +251,9 @@ tx_error:
 	return NETDEV_TX_OK;
 }
 
-/* checks parameters the driver gets from userspace */
-static int etherip_param_check(struct ip_tunnel_parm *p)
-{
-	if (p->iph.version != 4 ||
-	    p->iph.protocol != IPPROTO_ETHERIP ||
-	    p->iph.ihl != 5 ||
-	    p->iph.daddr == INADDR_ANY ||
-	    IN_MULTICAST(p->iph.daddr))
-		return -EINVAL;
-
-	return 0;
-}
-
-/* central ioctl function for all netdevices this driver manages
- * it allows to create, delete, modify a tunnel and fetch tunnel
- * information */
-static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
-		int cmd)
+static int etherip_tunnel_ioctl(struct net_device *dev,
+				struct ifreq *ifr,
+				int cmd)
 {
 	struct net *net = dev_net(dev);
 	struct etherip_net *ethip_net;
@@ -337,7 +288,12 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 			goto out;
 		p.i_flags = p.o_flags = 0;
 
-		if ((err = etherip_param_check(&p)) < 0)
+		err = -EINVAL;
+		if (p.iph.version != 4 ||
+		    p.iph.protocol != IPPROTO_ETHERIP ||
+		    p.iph.ihl != 5 ||
+		    p.iph.daddr == INADDR_ANY ||
+		    IN_MULTICAST(p.iph.daddr))
 			goto out;
 
 		t = etherip_tunnel_find(net, &p);
@@ -440,16 +396,47 @@ out:
 	return err;
 }
 
-static void etherip_tunnel_uninit(struct net_device *dev)
+static int etherip_change_mtu(struct net_device *dev, int new_mtu)
 {
-	struct etherip_net *ethip_net;
+	if (new_mtu < 68 || new_mtu > ETHERIP_MAX_MTU)
+		return -EINVAL;
+	dev->mtu = new_mtu;
 
-	ethip_net = net_generic(dev_net(dev), etherip_net_id);
+	return 0;
+}
 
-	if (dev != ethip_net->etherip_tunnel_dev)
-		etherip_tunnel_del(ethip_net, netdev_priv(dev));
+static struct rtnl_link_stats64 *etherip_get_stats64(struct net_device *dev,
+					struct rtnl_link_stats64 *tot)
+{
+	int i;
 
-	dev_put(dev);
+	for_each_possible_cpu(i) {
+		const struct pcpu_tstats *tstats = per_cpu_ptr(dev->tstats, i);
+		u64 rx_packets, rx_bytes, tx_packets, tx_bytes;
+		unsigned int start;
+
+		do {
+			start = u64_stats_fetch_begin_bh(&tstats->syncp);
+			rx_packets = tstats->rx_packets;
+			rx_bytes   = tstats->rx_bytes;
+			tx_packets = tstats->tx_packets;
+			tx_bytes   = tstats->tx_bytes;
+		} while (u64_stats_fetch_retry_bh(&tstats->syncp, start));
+
+		tot->rx_packets += rx_packets;
+		tot->rx_bytes   += rx_bytes;
+		tot->tx_packets += tx_packets;
+		tot->tx_bytes   += tx_bytes;
+	}
+
+        tot->tx_fifo_errors	= dev->stats.tx_fifo_errors;
+        tot->tx_carrier_errors	= dev->stats.tx_carrier_errors;
+        tot->tx_dropped		= dev->stats.tx_dropped;
+        tot->tx_aborted_errors	= dev->stats.tx_aborted_errors;
+        tot->tx_errors		= dev->stats.tx_errors;
+        tot->collisions		= dev->stats.collisions;
+
+	return tot;
 }
 
 static const struct net_device_ops etherip_netdev_ops = {
@@ -466,9 +453,6 @@ static void free_etheripdev(struct net_device *dev)
 	free_netdev(dev);
 }
 
-/* device init function - called via register_netdevice
- * The tunnel is registered as an Ethernet device. This allows
- * the tunnel to be added to a bridge */
 static void etherip_tunnel_setup(struct net_device *dev)
 {
 	ether_setup(dev);
@@ -479,9 +463,6 @@ static void etherip_tunnel_setup(struct net_device *dev)
 	random_ether_addr(dev->dev_addr);
 }
 
-/* receive function for EtherIP packets
- * Does some basic checks on the MAC addresses and
- * interface modes */
 static int etherip_rcv(struct sk_buff *skb)
 {
 	struct iphdr *iph;
