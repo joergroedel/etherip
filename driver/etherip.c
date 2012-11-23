@@ -362,7 +362,14 @@ static int etherip_tunnel_ioctl(struct net_device *dev,
 			if (t != NULL && t->dev != dev)
 				goto out;
 			t = netdev_priv(dev);
-			memcpy(&(t->parms), &p, sizeof(p));
+			etherip_tunnel_del(ethip_net, t);
+			synchronize_net();
+			t->parms.iph.saddr = p.iph.saddr;
+			t->parms.iph.daddr = p.iph.daddr;
+			t->parms.iph.ttl   = p.iph.ttl;
+			t->parms.iph.tos   = p.iph.tos;
+			etherip_tunnel_add(ethip_net, t);
+			netdev_state_change(dev);
 		}
 
 		if (t != NULL) {
@@ -370,7 +377,8 @@ static int etherip_tunnel_ioctl(struct net_device *dev,
 			if (copy_to_user(ifr->ifr_ifru.ifru_data, &p,
 						sizeof(p)))
 				goto out;
-		}
+		} else
+			err = (cmd == SIOCADDTUNNEL ? -ENOBUFS : -ENOENT);
 
 		err = 0;
 		break;
