@@ -88,7 +88,7 @@ static struct net_device_stats *etherip_get_stats(struct net_device *dev)
 
 	for_each_possible_cpu(i) {
 		const struct pcpu_tstats *tstats = per_cpu_ptr(dev->tstats, i);
-		
+
 		sum.rx_packets += tstats->rx_packets;
 		sum.rx_bytes   += tstats->rx_bytes;
 		sum.tx_packets += tstats->tx_packets;
