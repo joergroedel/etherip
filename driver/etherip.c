@@ -67,16 +67,17 @@ struct pcpu_tstats {
 };
 
 struct etherip_tunnel {
-	struct list_head list;
+	struct etherip_tunnel __rcu *next;
 	struct net_device *dev;
 	struct net_device_stats stats;
 	struct ip_tunnel_parm parms;
 };
 
 static struct net_device *etherip_tunnel_dev;
-static struct list_head tunnels[HASH_SIZE];
+static struct etherip_tunnel __rcu *tunnels[HASH_SIZE];
 
-static DEFINE_RWLOCK(etherip_lock);
+#define for_each_ethip_tunnel_rcu(it, start) \
+        for (it = rcu_dereference(start); it; it = rcu_dereference(it->next))
 
 static void etherip_tunnel_setup(struct net_device *dev);
 
@@ -118,13 +119,32 @@ static struct rtnl_link_stats64 *etherip_get_stats64(struct net_device *dev,
 static void etherip_tunnel_add(struct etherip_tunnel *tun)
 {
 	unsigned h = HASH(tun->parms.iph.daddr);
-	list_add_tail(&tun->list, &tunnels[h]);
+	struct etherip_tunnel __rcu **tunnel;
+
+	tunnel = &tunnels[h];
+
+	rcu_assign_pointer(tun->next, rtnl_dereference(*tunnel));
+	rcu_assign_pointer(*tunnel, tun);
 }
 
 /* delete a tunnel from the hash*/
 static void etherip_tunnel_del(struct etherip_tunnel *tun)
 {
-	list_del(&tun->list);
+	unsigned h = HASH(tun->parms.iph.daddr);
+	struct etherip_tunnel __rcu **tunnel;
+	struct etherip_tunnel *iter;
+
+	tunnel = &tunnels[h];
+
+	iter = rtnl_dereference(*tunnel);
+	while (iter != NULL) {
+		if (tun == iter) {
+			rcu_assign_pointer(*tunnel, iter->next);
+			break;
+		}
+		tunnel = &iter->next;
+		iter = rtnl_dereference(*tunnel);
+	}
 }
 
 /* find a tunnel in the hash by parameters from userspace */
@@ -133,7 +153,7 @@ static struct etherip_tunnel* etherip_tunnel_find(struct ip_tunnel_parm *p)
 	struct etherip_tunnel *ret;
 	unsigned h = HASH(p->iph.daddr);
 
-	list_for_each_entry(ret, &tunnels[h], list)
+	for_each_ethip_tunnel_rcu(ret, tunnels[h])
 		if (ret->parms.iph.daddr == p->iph.daddr)
 			return ret;
 
@@ -146,7 +166,7 @@ static struct etherip_tunnel* etherip_tunnel_locate(u32 remote)
 	struct etherip_tunnel *ret;
 	unsigned h = HASH(remote);
 
-	list_for_each_entry(ret, &tunnels[h], list)
+	for_each_ethip_tunnel_rcu(ret, tunnels[h])
 		if (ret->parms.iph.daddr == remote)
 			return ret;
 
@@ -361,9 +381,7 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 
 			dev_hold(tmp_dev);
 
-			write_lock_bh(&etherip_lock);
 			etherip_tunnel_add(t);
-			write_unlock_bh(&etherip_lock);
 
 		} else {
 			err = -EINVAL;
@@ -371,9 +389,7 @@ static int etherip_tunnel_ioctl(struct net_device *dev, struct ifreq *ifr,
 				goto out;
 			if (dev == etherip_tunnel_dev)
 				goto out;
-			write_lock_bh(&etherip_lock);
 			memcpy(&(t->parms), &p, sizeof(p));
-			write_unlock_bh(&etherip_lock);
 		}
 
 		err = 0;
@@ -402,9 +418,7 @@ add_err:
 		} else
 			t = netdev_priv(dev);
 
-		write_lock_bh(&etherip_lock);
 		etherip_tunnel_del(t);
-		write_unlock_bh(&etherip_lock);
 
 		unregister_netdevice(t->dev);
 		err = 0;
@@ -455,7 +469,6 @@ static int etherip_rcv(struct sk_buff *skb)
 
 	iph = ip_hdr(skb);
 
-	read_lock_bh(&etherip_lock);
 	tunnel = etherip_tunnel_locate(iph->saddr);
 	if (tunnel == NULL)
 		goto drop;
@@ -483,7 +496,6 @@ static int etherip_rcv(struct sk_buff *skb)
 		goto accept;
 
 drop:
-	read_unlock_bh(&etherip_lock);
 	kfree_skb(skb);
 	return 0;
 
@@ -493,7 +505,7 @@ accept:
 	tunnel->stats.rx_bytes += skb->len;
 	nf_reset(skb);
 	netif_rx(skb);
-	read_unlock_bh(&etherip_lock);
+
 	return 0;
 
 }
@@ -509,13 +521,10 @@ static struct net_protocol etherip_protocol = {
  * device */
 static int __init etherip_init(void)
 {
-	int err, i;
 	struct etherip_tunnel *p;
+	int err;
 
 	printk(KERN_INFO BANNER1);
-
-	for (i = 0; i < HASH_SIZE; ++i)
-		INIT_LIST_HEAD(&tunnels[i]);
 
 	if (inet_add_protocol(&etherip_protocol, IPPROTO_ETHERIP)) {
 		printk(KERN_ERR "etherip: can't add protocol\n");
@@ -556,19 +565,19 @@ err2:
 }
 
 /* destroy all tunnels */
-static void __exit etherip_destroy_tunnels(void)
+static void __exit etherip_destroy_tunnels(struct list_head *list)
 {
 	int i;
-	struct list_head *ptr;
-	struct etherip_tunnel *tun;
 
 	for (i = 0; i < HASH_SIZE; ++i) {
-		list_for_each(ptr, &tunnels[i]) {
-			tun = list_entry(ptr, struct etherip_tunnel, list);
-			ptr = ptr->prev;
-			etherip_tunnel_del(tun);
-			dev_put(tun->dev);
-			unregister_netdevice(tun->dev);
+		struct etherip_tunnel *tunnel;
+
+		tunnel = rtnl_dereference(tunnels[i]);
+		while (tunnel != NULL) {
+			etherip_tunnel_del(tunnel);
+			dev_put(tunnel->dev);
+			unregister_netdevice_queue(tunnel->dev, list);
+			tunnel = rtnl_dereference(tunnel->next);
 		}
 	}
 }
@@ -576,10 +585,14 @@ static void __exit etherip_destroy_tunnels(void)
 /* module cleanup function */
 static void __exit etherip_exit(void)
 {
+	LIST_HEAD(list);
+
 	rtnl_lock();
-	etherip_destroy_tunnels();
-	unregister_netdevice(etherip_tunnel_dev);
+	etherip_destroy_tunnels(&list);
+	unregister_netdevice_queue(etherip_tunnel_dev, &list);
+	unregister_netdevice_many(&list);
 	rtnl_unlock();
+
 	if (inet_del_protocol(&etherip_protocol, IPPROTO_ETHERIP))
 		printk(KERN_ERR "etherip: can't remove protocol\n");
 }
