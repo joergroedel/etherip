@@ -459,12 +459,26 @@ static struct rtnl_link_stats64 *etherip_get_stats64(struct net_device *dev,
 	return tot;
 }
 
+static int etherip_set_mac_address(struct net_device *dev, void *p)
+{
+	struct sockaddr *addr = p;
+
+	if (!is_valid_ether_addr(addr->sa_data))
+		return -EADDRNOTAVAIL;
+
+	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
+
+	return 0;
+}
+
 static const struct net_device_ops etherip_netdev_ops = {
-	.ndo_uninit	 = etherip_tunnel_uninit,
-	.ndo_start_xmit  = etherip_tunnel_xmit,
-	.ndo_do_ioctl    = etherip_tunnel_ioctl,
-	.ndo_change_mtu  = etherip_change_mtu,
-	.ndo_get_stats64 = etherip_get_stats64,
+	.ndo_uninit	     = etherip_tunnel_uninit,
+	.ndo_start_xmit      = etherip_tunnel_xmit,
+	.ndo_do_ioctl        = etherip_tunnel_ioctl,
+	.ndo_change_mtu      = etherip_change_mtu,
+	.ndo_get_stats64     = etherip_get_stats64,
+	.ndo_set_mac_address = etherip_set_mac_address
+
 };
 
 static void free_etheripdev(struct net_device *dev)
