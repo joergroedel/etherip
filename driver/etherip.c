@@ -63,14 +63,6 @@ MODULE_DESCRIPTION("Ethernet over IPv4 tunnel driver");
 
 #define BANNER1 "etherip: Ethernet over IPv4 tunneling driver\n"
 
-struct pcpu_tstats {
-	u64                   rx_packets;
-	u64                   rx_bytes;
-	u64                   tx_packets;
-	u64                   tx_bytes;
-	struct u64_stats_sync syncp;
-};
-
 struct etherip_tunnel {
 	struct etherip_tunnel __rcu *next;
 	struct net_device *dev;
@@ -226,7 +218,6 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct iphdr *iph;
 	struct net_device *tdev;
 	int max_headroom;
-	struct pcpu_tstats *tstats;
 	struct flowi4 fl4;
 
 	rt = ip_route_output_ports(dev_net(dev), &fl4, NULL,
@@ -298,10 +289,7 @@ static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	/* add the 16bit etherip header after the ip header */
 	((u16*)(iph+1))[0]=htons(ETHERIP_HEADER);
-	nf_reset(skb);
-	tstats = this_cpu_ptr(dev->tstats);
-	__IPTUNNEL_XMIT(tstats, &dev->stats);
-	tunnel->dev->trans_start = jiffies;
+	iptunnel_xmit(skb, dev);
 
 	return NETDEV_TX_OK;
 
