@@ -35,7 +35,6 @@
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/route.h>
-#include <net/ipip.h>
 #include <net/xfrm.h>
 #include <net/inet_ecn.h>
 
@@ -209,6 +208,29 @@ static void etherip_tunnel_uninit(struct net_device *dev)
 		etherip_tunnel_del(ethip_net, netdev_priv(dev));
 
 	dev_put(dev);
+}
+
+static inline void iptunnel_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	int err;
+	struct iphdr *iph = ip_hdr(skb);
+	int pkt_len = skb->len - skb_transport_offset(skb);
+	struct pcpu_tstats *tstats = this_cpu_ptr(dev->tstats);
+
+	nf_reset(skb);
+	skb->ip_summed = CHECKSUM_NONE;
+	ip_select_ident(iph, skb_dst(skb), NULL);
+
+	err = ip_local_out(skb);
+	if (likely(net_xmit_eval(err) == 0)) {
+		u64_stats_update_begin(&tstats->syncp);
+		tstats->tx_bytes += pkt_len;
+		tstats->tx_packets++;
+		u64_stats_update_end(&tstats->syncp);
+	} else {
+		dev->stats.tx_errors++;
+		dev->stats.tx_aborted_errors++;
+	}
 }
 
 static int etherip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -626,6 +648,7 @@ static struct net_protocol etherip_protocol = {
 	.handler      = etherip_rcv,
 	.err_handler  = 0,
 	.no_policy    = 0,
+	.netns_ok     = 1
 };
 
 static int __init etherip_init(void)
