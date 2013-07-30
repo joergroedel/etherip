@@ -493,6 +493,7 @@ static int etherip_rcv(struct sk_buff *skb)
 
 	iph = ip_hdr(skb);
 
+	rcu_read_lock();
 	tunnel = etherip_tunnel_locate(dev_net(skb->dev), iph->saddr);
 	if (tunnel == NULL)
 		goto drop;
@@ -502,10 +503,11 @@ static int etherip_rcv(struct sk_buff *skb)
 	skb_pull(skb, (skb_network_header(skb)-skb->data) +
 			sizeof(struct iphdr)+ETHERIP_HLEN);
 
-	skb->dev = dev;
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, tunnel->dev);
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
+
+	__skb_tunnel_rx(skb, dev);
 	skb_dst_drop(skb);
 
 	/* do some checks */
@@ -521,6 +523,8 @@ static int etherip_rcv(struct sk_buff *skb)
 
 drop:
 	kfree_skb(skb);
+	rcu_read_unlock();
+
 	return 0;
 
 accept:
@@ -529,6 +533,7 @@ accept:
 	tunnel->stats.rx_bytes += skb->len;
 	nf_reset(skb);
 	netif_rx(skb);
+	rcu_read_unlock();
 
 	return 0;
 
